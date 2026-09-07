@@ -448,11 +448,11 @@ const Admin = {
                 window.supabaseClient.from('deliveries').select('*', { count: 'exact', head: true })
             ]);
 
-            document.getElementById('statOrders').textContent    = total      ?? '-';
-            document.getElementById('statVisible').textContent   = visible    ?? '-';
-            document.getElementById('statDelivered').textContent = delivered  ?? '-';
-            document.getElementById('statHidden').textContent    = hidden     ?? '-';
-            document.getElementById('statDeliveries').textContent= deliveries ?? '-';
+            document.getElementById('statOrders').textContent    = total != null ? total.toLocaleString('en-US') : '-';
+            document.getElementById('statVisible').textContent   = visible != null ? visible.toLocaleString('en-US') : '-';
+            document.getElementById('statDelivered').textContent = delivered != null ? delivered.toLocaleString('en-US') : '-';
+            document.getElementById('statHidden').textContent    = hidden != null ? hidden.toLocaleString('en-US') : '-';
+            document.getElementById('statDeliveries').textContent= deliveries != null ? deliveries.toLocaleString('en-US') : '-';
         } catch (e) {
             console.error('loadStats error:', e);
         }
