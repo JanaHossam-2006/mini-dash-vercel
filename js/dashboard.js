@@ -222,5 +222,12 @@ const Dashboard = {
 function formatNumberEnglish(value) {
     if (value === null || value === undefined || value === '') return '0';
     const map = { '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9' };
-    return String(value).replace(/[٠-٩]/g, c => map[c] || c);
+    let englishStr = String(value).replace(/[٠-٩]/g, c => map[c] || c);
+    
+    if (!isNaN(englishStr) && englishStr.trim() !== '') {
+        const parts = englishStr.split('.');
+        parts[0] = parseInt(parts[0], 10).toLocaleString('en-US');
+        return parts.join('.');
+    }
+    return englishStr;
 }
