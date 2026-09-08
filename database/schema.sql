@@ -134,7 +134,14 @@ BEGIN
                 WHERE d.customer_phone = o.customer_phone
                   AND d.order_code <> o.order_code
                   AND (d.store = o.store OR d.store IS NULL OR o.store IS NULL)
-            ) THEN 'استلم بكود آخر غير موجود'
+            ) THEN 'استلم بكود آخر غير موجود - ' || (
+                SELECT d.order_code FROM deliveries d
+                WHERE d.customer_phone = o.customer_phone
+                  AND d.order_code <> o.order_code
+                  AND (d.store = o.store OR d.store IS NULL OR o.store IS NULL)
+                ORDER BY d.delivery_date DESC NULLS LAST
+                LIMIT 1
+            )
 
             ELSE 'no'
         END;
