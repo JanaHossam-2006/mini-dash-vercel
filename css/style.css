@@ -435,6 +435,33 @@ body {
     transform: translateY(0);
 }
 
+.btn-success {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: inherit;
+    background-color: var(--accent-emerald, #10b981);
+    color: white;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+.btn-success:hover {
+    background-color: #059669;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);
+}
+
+.btn-success:active {
+    transform: translateY(0);
+}
+
 /* KPIs */
 .kpis-section {
     margin-bottom: 24px;

@@ -214,7 +214,99 @@ const Dashboard = {
         document.getElementById('error')?.style.setProperty('display', 'block');
     },
 
-    async retry() { await this.loadDashboard(); }
+    async retry() { await this.loadDashboard(); },
+
+    /* ── CSV Export ──────────────────────────────────────────────────────── */
+
+    exportCSV() {
+        try {
+            if (!this.cachedRows || this.cachedRows.length === 0) {
+                alert('لا توجد بيانات لتصديرها');
+                return;
+            }
+
+            // Get currently filtered rows (or all cached rows if no filter applied)
+            const rowsToExport = API.applyFilters(this.cachedRows, this.currentFilters);
+
+            if (!rowsToExport || rowsToExport.length === 0) {
+                alert('لا توجد بيانات مطابقة للفلاتر لتصديرها');
+                return;
+            }
+
+            const fieldKeys = [
+                'order_code',
+                'order_date',
+                'employee_name',
+                'customer_phone',
+                'store',
+                'product_name',
+                'price',
+                'client_status',
+                'shipment_status',
+                'shipping_company',
+                'call_attempts',
+                'delivered',
+                'delivery_filter',
+                'dashboard_filter'
+            ];
+
+            const headerLabels = [
+                'كود_الطلب',
+                'تاريخ_الطلب',
+                'اسم_الموظف',
+                'رقم_العميل',
+                'المتجر',
+                'اسم_المنتج',
+                'السعر',
+                'حالة_العميل',
+                'حالة_الشحنة',
+                'شركة_الشحن',
+                'عدد_المحاولات',
+                'تسليم',
+                'فلتر_التسليم',
+                'فلتر_الداشبورد'
+            ];
+
+            const csvRows = [];
+            // Add UTF-8 header row
+            csvRows.push(headerLabels.map(h => `"${h.replace(/"/g, '""')}"`).join(','));
+
+            // Add Data rows
+            rowsToExport.forEach(row => {
+                const line = fieldKeys.map(key => {
+                    let val = row[key];
+                    if (val === null || val === undefined) val = '';
+                    if (key === 'order_date' && val) {
+                        const d = parseOrderDate(val);
+                        if (d) val = d.toISOString().split('T')[0];
+                    }
+                    return `"${String(val).replace(/"/g, '""')}"`;
+                });
+                csvRows.push(line.join(','));
+            });
+
+            // Include UTF-8 BOM byte (\uFEFF) for Excel Arabic support
+            const csvString = '\uFEFF' + csvRows.join('\r\n');
+            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+
+            const dateStr = new Date().toISOString().split('T')[0];
+            const fileName = `orders_export_${dateStr}.csv`;
+
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', fileName);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            console.error('exportCSV error:', error);
+            alert('حدث خطأ أثناء تصدير ملف CSV: ' + error.message);
+        }
+    }
 };
 
 /* ── utility ────────────────────────────────────────────────────────────────── */

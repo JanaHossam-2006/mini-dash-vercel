@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS orders (
     shipping_company TEXT,
     
     -- Calculated columns (managed by database)
-    delivered BOOLEAN DEFAULT FALSE,
+    delivered TEXT DEFAULT 'no',
     filter TEXT DEFAULT 'no',
     delivery_filter TEXT DEFAULT NULL,
     dashboard_filter TEXT DEFAULT NULL,
@@ -98,143 +98,83 @@ CREATE INDEX IF NOT EXISTS idx_test_orders_order_code ON test_orders(order_code)
 
 -- ============================================================================
 -- FUNCTION: recalculate_calculated_columns()
--- Recalculates delivered, delivery_filter, filter for ALL orders
--- Call this after uploading new data
+-- Recalculates delivered, delivery_filter, filter, and dashboard_filter for ALL orders
+-- Call this after uploading new data or clicking "إعادة الحساب"
 -- ============================================================================
 CREATE OR REPLACE FUNCTION recalculate_calculated_columns()
-RETURNS void AS $$
-DECLARE
-    rec orders;
-    v_delivered BOOLEAN;
-    v_delivery_filter TEXT;
-    v_filter TEXT;
-    v_dashboard_filter TEXT;
-    v_has_own_delivery BOOLEAN;
-    v_has_other_delivery_for_customer BOOLEAN;
-    v_delivered_codes_for_customer TEXT[];
-    v_newest_non_delivered_order_id UUID;
-    
-    -- For cursor-based processing of customer deliveries
-    c_customer_deliveries CURSOR FOR 
-        SELECT DISTINCT d.customer_phone
-        FROM deliveries d
-        INNER JOIN orders o ON d.customer_phone = o.customer_phone
-        WHERE o.order_code != d.order_code
-        AND o.delivery_filter IS NULL;
-    
-    v_customer_phone TEXT;
-    v_first_delivered_order_code TEXT;
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
 BEGIN
-    -- Process customers who received delivery with DIFFERENT order code
-    OPEN c_customer_deliveries;
-    LOOP
-        FETCH c_customer_deliveries INTO v_customer_phone;
-        EXIT WHEN NOT FOUND;
-        
-        -- Get first delivered order code for this customer
-        SELECT d.order_code INTO v_first_delivered_order_code
-        FROM deliveries d
-        WHERE d.customer_phone = v_customer_phone
-        AND NOT EXISTS (
-            SELECT 1 FROM orders o
-            WHERE o.order_code = d.order_code
-        )
-        ORDER BY d.delivery_date ASC
-        LIMIT 1;
-        
-        -- Find newest non-delivered order for this customer
-        SELECT o.id INTO v_newest_non_delivered_order_id
-        FROM orders o
-        WHERE o.customer_phone = v_customer_phone
-        AND o.order_code != ALL(
-            SELECT d.order_code FROM deliveries d WHERE d.customer_phone = v_customer_phone
-        )
-        ORDER BY o.order_date DESC
-        LIMIT 1;
-        
-        -- Update all orders for this customer
-        UPDATE orders SET
-            delivery_filter = CASE 
-                WHEN id = v_newest_non_delivered_order_id THEN 'استلم بكود آخر'
-                ELSE 'Ignore'
-            END,
-            dashboard_filter = CASE 
-                WHEN id = v_newest_non_delivered_order_id THEN NULL
-                ELSE 'Ignore'
-            END,
-            updated_at = NOW()
-        WHERE customer_phone = v_customer_phone
-        AND order_code != ALL(
-            SELECT d.order_code FROM deliveries d WHERE d.customer_phone = v_customer_phone
-        );
-    END LOOP;
-    CLOSE c_customer_deliveries;
-    
-    -- Process all orders
-    FOR rec IN 
-        SELECT * FROM orders
-        WHERE delivery_filter IS NULL OR delivery_filter = ''
-        ORDER BY id
-    LOOP
-        v_delivered := FALSE;
-        v_delivery_filter := NULL;
-        v_filter := 'no';
-        v_dashboard_filter := NULL;
-        
-        -- Check if this specific order_code is delivered
-        SELECT EXISTS (
-            SELECT 1 FROM deliveries 
-            WHERE order_code = rec.order_code
-        ) INTO v_has_own_delivery;
-        
-        IF v_has_own_delivery THEN
-            v_delivered := TRUE;
-            v_delivery_filter := 'تم التسليم بنفس الكود';
-        ELSE
-            -- Check if customer has deliveries with OTHER order codes
-            SELECT EXISTS (
+
+    -- ── Step 1: Update delivered and delivery_filter (with store matching) ──
+    UPDATE orders o
+    SET
+        delivered = CASE
+            WHEN EXISTS (
                 SELECT 1 FROM deliveries d
-                WHERE d.customer_phone = rec.customer_phone
-                AND d.order_code != rec.order_code
-            ) INTO v_has_other_delivery_for_customer;
-            
-            IF v_has_other_delivery_for_customer THEN
-                v_delivery_filter := 'Ignore';
-            END IF;
-        END IF;
-        
-        -- Check if order is in test_orders
-        SELECT EXISTS (
-            SELECT 1 FROM test_orders
-            WHERE order_code = rec.order_code
-        ) INTO v_filter;
-        
-        IF v_filter THEN
-            v_filter := 'yes';
-        ELSE
-            v_filter := 'no';
-        END IF;
-        
-        -- Determine dashboard_filter
-        IF v_delivery_filter = 'Ignore' THEN
-            v_dashboard_filter := 'Ignore';
-        ELSE
-            v_dashboard_filter := NULL;
-        END IF;
-        
-        -- UPDATE the order with calculated values
-        UPDATE orders SET
-            delivered = v_delivered,
-            delivery_filter = v_delivery_filter,
-            filter = v_filter,
-            dashboard_filter = v_dashboard_filter,
-            updated_at = NOW()
-        WHERE id = rec.id;
-        
-    END LOOP;
-    
+                WHERE d.order_code = o.order_code
+                   OR (
+                       d.customer_phone = o.customer_phone
+                       AND (d.store = o.store OR d.store IS NULL OR o.store IS NULL)
+                   )
+            ) THEN 'yes'
+            ELSE 'no'
+        END,
+
+        delivery_filter = CASE
+            WHEN EXISTS (
+                SELECT 1 FROM deliveries d
+                WHERE d.order_code = o.order_code
+            ) THEN 'تم التسليم بنفس الكود'
+
+            WHEN EXISTS (
+                SELECT 1 FROM deliveries d
+                WHERE d.customer_phone = o.customer_phone
+                  AND d.order_code <> o.order_code
+                  AND (d.store = o.store OR d.store IS NULL OR o.store IS NULL)
+            ) THEN 'استلم بكود آخر غير موجود'
+
+            ELSE 'no'
+        END;
+
+    -- ── Step 2: Update dashboard_filter based on order rank and customer status (per store)
+    WITH order_status AS (
+        SELECT
+            o.id,
+            o.delivered,
+            MAX(
+                CASE WHEN o.delivered = 'yes' THEN 1 ELSE 0 END
+            ) OVER (PARTITION BY o.customer_phone, o.store) AS customer_has_delivered,
+            ROW_NUMBER() OVER (
+                PARTITION BY o.customer_phone, o.store
+                ORDER BY o.order_date ASC, o.id ASC
+            ) AS order_rank
+        FROM orders o
+    )
+    UPDATE orders o
+    SET dashboard_filter = CASE
+        -- 1) الطلب نفسه اتسلم
+        WHEN s.delivered = 'yes'
+        THEN 'Yes'
+
+        -- 2) العميل استلم طلب آخر لنفس المتجر
+        WHEN s.customer_has_delivered = 1
+        THEN 'Ignore'
+
+        -- 3) العميل لا يملك أي تسليمات في هذا المتجر: نظهر أول طلب فقط
+        WHEN s.order_rank = 1
+        THEN 'No'
+
+        -- 4) باقي طلبات نفس العميل غير المسلمة نلغيها
+        ELSE 'Ignore'
+    END
+    FROM order_status s
+    WHERE o.id = s.id;
+
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- ============================================================================
 -- FUNCTION: recalculate_single_order()

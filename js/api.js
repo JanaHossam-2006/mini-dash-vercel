@@ -393,6 +393,8 @@ function getCallAttemptsStats(rows) {
 
 const API = {
 
+    applyFilters,
+
     /**
      * Initial load: ONE Supabase fetch, everything else is in-memory.
      * Returns filterOptions, dateFilterOptions, dashboardData (+ timeSeriesData).
